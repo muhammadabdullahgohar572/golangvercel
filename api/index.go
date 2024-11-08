@@ -24,7 +24,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 
 	server.GET("/", func(context *Context) {
 		context.JSON(200, H{
-			"message": "hello go from vercel !!!!",
+			"message": "hello go from vercel ",
 		})
 	})
 	server.GET("/hello", func(context *Context) {
