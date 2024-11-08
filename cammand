@@ -1,0 +1,4 @@
+go mod init myapp
+go get github.com/tbxark/g4vercel
+npm i vercel
+vercel .

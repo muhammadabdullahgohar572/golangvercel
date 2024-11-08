@@ -1,11 +1,23 @@
-package handler
+package main
 
 import (
 	"fmt"
 	"net/http"
 
+	"github.com/dgrijalva/jwt-go"
+	"gorm.io/gorm"
 	. "github.com/tbxark/g4vercel"
 )
+
+type CreateUserData struct {
+	gorm.Model
+	Name     string `json:"name"`
+	Email    string `json:"email"`
+	Password string `json:"password"`
+	Gender   string `json:"gender"`
+	Company  string `json:"company"`
+	jwt.StandardClaims
+}
 
 func Handler(w http.ResponseWriter, r *http.Request) {
 	server := New()
