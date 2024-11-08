@@ -1,5 +1,3 @@
-// main.go
-
 package handler
 
 import (
@@ -7,8 +5,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-
-	"github.com/dgrijalva/jwt-go"
 	. "github.com/tbxark/g4vercel"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
@@ -24,19 +20,21 @@ type CreateUserData struct {
 	Password string `json:"password"`
 	Gender   string `json:"gender"`
 	Company  string `json:"company"`
-	jwt.StandardClaims
 }
 
+// Initialize the database connection once
 func Dbconnect() {
-	dbUrl := os.Getenv("Dgconnect")
+	if database != nil {
+		return // Reuse existing connection
+	}
 
+	dbUrl := os.Getenv("Dgconnect")
 	if dbUrl == "" {
 		log.Fatal("Database URL (Dgconnect) is not set")
 	}
 
 	var err error
 	database, err = gorm.Open(mysql.Open(dbUrl), &gorm.Config{})
-
 	if err != nil {
 		log.Panicf("Failed to connect to database: %v", err)
 	}
@@ -47,18 +45,18 @@ func Dbconnect() {
 
 // Handler function for handling requests
 func Handler(w http.ResponseWriter, r *http.Request) {
-	server := New()
 	defer func() {
-		if r := recover(); r != nil {
-			fmt.Fprintf(w, "Database connection failed: %v", r)
+		if rec := recover(); rec != nil {
+			http.Error(w, fmt.Sprintf("Internal Server Error: %v", rec), http.StatusInternalServerError)
 		}
 	}()
 
-	Dbconnect()
+	Dbconnect() // Connect to the database once
 
+	server := New()
 	server.GET("/", func(context *Context) {
 		context.JSON(200, H{
-			"message": "hello go from vercel ",
+			"message": "Hello Go from Vercel!",
 		})
 	})
 	server.GET("/hello", func(context *Context) {
@@ -74,7 +72,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		}
 	})
 	server.GET("/user/:id", func(context *Context) {
-		context.JSON(400, H{
+		context.JSON(200, H{
 			"data": H{
 				"id": context.Param("id"),
 			},
@@ -88,5 +86,6 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		})
 	})
 
+	// Handle the request with the Vercel server
 	server.Handle(w, r)
 }
