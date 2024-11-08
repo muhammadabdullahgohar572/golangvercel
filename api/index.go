@@ -9,9 +9,9 @@ import (
 	"os"
 
 	"github.com/dgrijalva/jwt-go"
+	. "github.com/tbxark/g4vercel"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
-	. "github.com/tbxark/g4vercel"
 )
 
 // Global variable to hold the database connection
@@ -26,7 +26,6 @@ type CreateUserData struct {
 	Company  string `json:"company"`
 	jwt.StandardClaims
 }
-
 
 func Dbconnect() {
 	dbUrl := os.Getenv("Dgconnect")
@@ -49,7 +48,13 @@ func Dbconnect() {
 // Handler function for handling requests
 func Handler(w http.ResponseWriter, r *http.Request) {
 	server := New()
-	Dbconnect() // Initialize the database connection
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintf(w, "Database connection failed: %v", r)
+		}
+	}()
+
+	Dbconnect()
 
 	server.GET("/", func(context *Context) {
 		context.JSON(200, H{
