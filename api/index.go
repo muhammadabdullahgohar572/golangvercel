@@ -1,6 +1,6 @@
 // main.go
 
-package main
+package handler
 
 import (
 	"fmt"
