@@ -1,13 +1,21 @@
+// main.go
+
 package main
 
 import (
 	"fmt"
+	"log"
 	"net/http"
+	"os"
 
 	"github.com/dgrijalva/jwt-go"
+	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	. "github.com/tbxark/g4vercel"
 )
+
+// Global variable to hold the database connection
+var database *gorm.DB
 
 type CreateUserData struct {
 	gorm.Model
@@ -19,8 +27,29 @@ type CreateUserData struct {
 	jwt.StandardClaims
 }
 
+
+func Dbconnect() {
+	dbUrl := os.Getenv("Dgconnect")
+
+	if dbUrl == "" {
+		log.Fatal("Database URL (Dgconnect) is not set")
+	}
+
+	var err error
+	database, err = gorm.Open(mysql.Open(dbUrl), &gorm.Config{})
+
+	if err != nil {
+		log.Panicf("Failed to connect to database: %v", err)
+	}
+
+	// Automatically migrate the schema
+	database.AutoMigrate(&CreateUserData{})
+}
+
+// Handler function for handling requests
 func Handler(w http.ResponseWriter, r *http.Request) {
 	server := New()
+	Dbconnect() // Initialize the database connection
 
 	server.GET("/", func(context *Context) {
 		context.JSON(200, H{
@@ -53,5 +82,6 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 			},
 		})
 	})
+
 	server.Handle(w, r)
 }
