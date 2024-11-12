@@ -1,17 +1,44 @@
 package main
 
 import (
-	
+	"fmt"
+	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 	"golang.org/x/crypto/bcrypt"
 	"github.com/golang-jwt/jwt/v4"
 )
 
-// Secret key for JWT
+// MongoDB client and collections
+var client *mongo.Client
+var usersCollection *mongo.Collection
+
+// JWT secret
 var jwtSecret = []byte("abdullah55")
+
+// MongoDB connection string from environment
+var mongoURI = os.Getenv("MONGO_URI")
+
+// Initialize MongoDB connection
+func initMongo() {
+	if mongoURI == "" {
+		log.Fatal("MONGO_URI environment variable not set")
+	}
+
+	var err error
+	client, err = mongo.Connect(nil, options.Client().ApplyURI(mongoURI))
+	if err != nil {
+		log.Fatal("Error connecting to MongoDB:", err)
+	}
+
+	usersCollection = client.Database("userdb").Collection("users")
+}
 
 // HashPassword hashes a plain password
 func HashPassword(password string) (string, error) {
@@ -36,6 +63,9 @@ func GenerateJWT(userID string) (string, error) {
 
 // Handler function for Vercel
 func Handler(w http.ResponseWriter, r *http.Request) {
+	// Initialize MongoDB connection
+	initMongo()
+
 	router := gin.Default()
 
 	// Signup route
@@ -59,8 +89,18 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Simulate saving user data to a database
-		// Example: db.SaveUser(req.Username, req.Email, req.Age, req.CompanyName, hashedPassword)
+		// Save the user data to MongoDB
+		_, err = usersCollection.InsertOne(nil, bson.M{
+			"username":    req.Username,
+			"email":       req.Email,
+			"age":         req.Age,
+			"company_name": req.CompanyName,
+			"password":    hashedPassword,
+		})
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"message": "Error saving user"})
+			return
+		}
 
 		// Return response with user details and hashed password
 		c.JSON(http.StatusOK, gin.H{
@@ -84,13 +124,19 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Simulate fetching the hashed password from the database by email
-		// In reality, you should query your DB and fetch the hashed password
-		// Example: db.GetHashedPasswordByEmail(req.Email)
-		hashedPasswordFromDB := "$2a$12$dummyhashedpassword"
+		// Fetch the user by email from MongoDB
+		var user struct {
+			Email    string `json:"email"`
+			Password string `json:"password"`
+		}
+		err := usersCollection.FindOne(nil, bson.M{"email": req.Email}).Decode(&user)
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"message": "Invalid credentials"})
+			return
+		}
 
 		// Check if the provided password matches the stored hashed password
-		if !CheckPasswordHash(req.Password, hashedPasswordFromDB) {
+		if !CheckPasswordHash(req.Password, user.Password) {
 			c.JSON(http.StatusUnauthorized, gin.H{"message": "Invalid credentials"})
 			return
 		}
@@ -108,4 +154,3 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	// Serve the Gin router as the response to the Vercel function
 	router.ServeHTTP(w, r)
 }
-
