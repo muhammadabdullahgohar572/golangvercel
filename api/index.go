@@ -1,263 +1,154 @@
-package handler
+package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"time"
-    "github.com/gorilla/mux"
-	"github.com/dgrijalva/jwt-go"
+
+	"github.com/golang-jwt/jwt/v4"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 	"golang.org/x/crypto/bcrypt"
-	"gorm.io/driver/mysql"
-	"gorm.io/gorm"
-	. "github.com/tbxark/g4vercel"
 )
 
-// Global variable to hold the database connection
-var database *gorm.DB
-var JWT_SECRET_KEY []byte
+var jwtKey = []byte("your_secret_key")
 
-// Struct to hold user data
-type CreateUserData struct {
-	gorm.Model
-	Name     string `json:"name"`
-	Email    string `json:"email"`
+// MongoDB Client
+var client *mongo.Client
+
+type Credentials struct {
+	Username string `json:"username"`
 	Password string `json:"password"`
-	Gender   string `json:"gender"`
-	Company  string `json:"company"`
-	jwt.StandardClaims
 }
 
-// Function to connect to the database
-func Dbconnect() {
-	dbUrl := os.Getenv("Dgconnect")
-	if dbUrl == "" {
-		log.Fatal("Database URL (Dgconnect) is not set")
-	}
+type Claims struct {
+	Username string `json:"username"`
+	jwt.RegisteredClaims
+}
 
+// Initialize MongoDB connection
+func init() {
+	clientOptions := options.Client().ApplyURI("mongodb+srv://Abdullah1:Abdullah1@cluster0.agxpb.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0")
 	var err error
-	database, err = gorm.Open(mysql.Open(dbUrl), &gorm.Config{})
+	client, err = mongo.Connect(context.TODO(), clientOptions)
 	if err != nil {
-		log.Panicf("Failed to connect to database: %v", err)
+		log.Fatal(err)
 	}
-
-	// Automatically migrate the schema
-	database.AutoMigrate(&CreateUserData{})
+	fmt.Println("Connected to MongoDB!")
 }
 
-
-var jwtKey []byte
-
-func HashPassword(password string) (string, error) {
+// Hash password
+func hashPassword(password string) (string, error) {
 	bytes, err := bcrypt.GenerateFromPassword([]byte(password), 14)
 	return string(bytes), err
 }
 
-func CompareHashAndPassword(password, hash string) bool {
+// Check password hash
+func checkPasswordHash(password, hash string) bool {
 	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
-	if err != nil {
-
-		return false // Password does not match the stored hash.
-
-	}
 	return err == nil
 }
 
-func Createuserdata(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	var CreateuserdataNew CreateUserData
-
-	if err := json.NewDecoder(r.Body).Decode(&CreateuserdataNew); err != nil {
-		http.Error(w, "1", http.StatusBadRequest)
+// Signup Handler
+func Signup(w http.ResponseWriter, r *http.Request) {
+	var creds Credentials
+	err := json.NewDecoder(r.Body).Decode(&creds)
+	if err != nil {
+		http.Error(w, "Invalid input", http.StatusBadRequest)
 		return
 	}
 
-	HashPassword, err := HashPassword(CreateuserdataNew.Password)
+	// Hash the password
+	hashedPassword, err := hashPassword(creds.Password)
 	if err != nil {
 		http.Error(w, "Error hashing password", http.StatusInternalServerError)
 		return
 	}
-	CreateuserdataNew.Password = HashPassword
 
-	if err := database.Create(&CreateuserdataNew).Error; err != nil {
-		http.Error(w, "Databasea", http.StatusBadRequest)
+	// Save user to MongoDB
+	collection := client.Database("test").Collection("users")
+	_, err = collection.InsertOne(context.TODO(), map[string]string{
+		"username": creds.Username,
+		"password": hashedPassword,
+	})
+	if err != nil {
+		http.Error(w, "Error saving user", http.StatusInternalServerError)
 		return
 	}
 
-	if err := json.NewEncoder(w).Encode(CreateuserdataNew); err != nil {
-		http.Error(w, "e", http.StatusBadRequest)
-	}
-
+	w.Write([]byte("Signup successful"))
 }
 
-func login(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	var MatchuserData CreateUserData
-	var Extinguser CreateUserData
-
-	json.NewDecoder(r.Body).Decode(&MatchuserData)
-
-	if err := database.Where("email = ? ", MatchuserData.Email).First(&Extinguser).Error; err != nil {
-		http.Error(w, "User Email not Found", http.StatusUnauthorized)
+// Login Handler
+func Login(w http.ResponseWriter, r *http.Request) {
+	var creds Credentials
+	err := json.NewDecoder(r.Body).Decode(&creds)
+	if err != nil {
+		http.Error(w, "Invalid input", http.StatusBadRequest)
 		return
 	}
 
-	if !CompareHashAndPassword(MatchuserData.Password, Extinguser.Password) {
-		http.Error(w, "invalid password", http.StatusUnauthorized)
+	// Retrieve user from MongoDB
+	collection := client.Database("test").Collection("users")
+	var user Credentials
+	err = collection.FindOne(context.TODO(), map[string]string{"username": creds.Username}).Decode(&user)
+	if err != nil || !checkPasswordHash(creds.Password, user.Password) {
+		http.Error(w, "Invalid username or password", http.StatusUnauthorized)
 		return
 	}
 
-	TokenExpire := time.Now().Add(24 * time.Hour)
-	cleams := &CreateUserData{
-		Name:     Extinguser.Name,
-		Email:    Extinguser.Email,
-		Password: Extinguser.Password,
-		Gender:   Extinguser.Gender,
-		Company:  Extinguser.Company,
-		StandardClaims: jwt.StandardClaims{
-			ExpiresAt: TokenExpire.Unix(),
+	// Create JWT token
+	expirationTime := time.Now().Add(24 * time.Hour)
+	claims := &Claims{
+		Username: creds.Username,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(expirationTime),
 		},
 	}
-
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, cleams)
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	tokenString, err := token.SignedString(jwtKey)
-
 	if err != nil {
-		http.Error(w, "Error signing token", http.StatusInternalServerError)
+		http.Error(w, "Error generating token", http.StatusInternalServerError)
 		return
 	}
 
-	json.NewEncoder(w).Encode(map[string]string{
-		"token": tokenString,
+	http.SetCookie(w, &http.Cookie{
+		Name:    "token",
+		Value:   tokenString,
+		Expires: expirationTime,
 	})
-
+	w.Write([]byte("Login successful"))
 }
 
-func sign(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	var Extinguser CreateUserData
-	var MatchuserData CreateUserData
-
-	json.NewDecoder(r.Body).Decode(&MatchuserData)
-
-	if err := database.Where("email = ?", MatchuserData.Email).First(&Extinguser).Error; err != nil {
-
-		http.Error(w, "email not found", http.StatusUnauthorized)
-		return
-	}
-
-	if !CompareHashAndPassword(MatchuserData.Password, Extinguser.Password) {
-		http.Error(w, "invalid password", http.StatusUnauthorized)
-		return
-	}
-
-	TokenExpire := time.Now().Add(24 * time.Hour)
-
-	Cleaims := &CreateUserData{
-		Name:     Extinguser.Name,
-		Email:    Extinguser.Email,
-		Password: Extinguser.Password,
-		Gender:   Extinguser.Gender,
-		Company:  Extinguser.Company,
-		StandardClaims: jwt.StandardClaims{
-			ExpiresAt: TokenExpire.Unix(),
-		},
-	}
-
-	jwtKey = []byte(os.Getenv("JWT_SECRET_KEY"))
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, Cleaims)
-
-	tokenstring, err := token.SignedString(jwtKey)
+// Protected profile route
+func Profile(w http.ResponseWriter, r *http.Request) {
+	c, err := r.Cookie("token")
 	if err != nil {
-		http.Error(w, "Error signing token", http.StatusInternalServerError)
+		http.Error(w, "Not authenticated", http.StatusUnauthorized)
 		return
 	}
 
-	json.NewEncoder(w).Encode(map[string]string{
-		"token": tokenstring,
-	})
-
-}
-
-func Decode(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	tokenStr := r.URL.Query().Get("token")
-	if jwtKey == nil {
-		jwtKey = []byte(os.Getenv("JWT_SECRET_KEY"))
-	}
-	cleims := &CreateUserData{}
-
-	token, err := jwt.ParseWithClaims(tokenStr, cleims, func(*jwt.Token) (interface{}, error) {
+	tokenStr := c.Value
+	claims := &Claims{}
+	tkn, err := jwt.ParseWithClaims(tokenStr, claims, func(token *jwt.Token) (interface{}, error) {
 		return jwtKey, nil
 	})
-
-	if err != nil || !token.Valid {
+	if err != nil || !tkn.Valid {
 		http.Error(w, "Invalid token", http.StatusUnauthorized)
 		return
 	}
 
-	userData := map[string]interface{}{
-		"UserName": cleims.Name,
-		"Email":    cleims.Email,
-		"Password": cleims.Password, // Include only if necessary
-		"Age":      cleims.Company,
-		"Gender":   cleims.Gender,
-	}
-
-	if err := json.NewEncoder(w).Encode(userData); err != nil {
-		http.Error(w, "Error encoding response", http.StatusInternalServerError)
-		return
-	}
+	w.Write([]byte(fmt.Sprintf("Welcome %s!", claims.Username)))
 }
 
+func main() {
+	http.HandleFunc("/signup", Signup)
+	http.HandleFunc("/login", Login)
+	http.HandleFunc("/profile", Profile)
 
-
-// CORS middleware to handle all origins and allow specific methods and headers
-func CORS(next http.Handler) http.Handler {
-    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        w.Header().Set("Access-Control-Allow-Origin", "*")
-        w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
-        w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
-        w.Header().Set("Access-Control-Allow-Credentials", "true")
-
-        if r.Method == http.MethodOptions {
-            w.WriteHeader(http.StatusOK)
-            return
-        }
-
-        next.ServeHTTP(w, r)
-    })
-}
-// Main Handler for routing
-func Handler(w http.ResponseWriter, r *http.Request) {
-    server := New()
-
-    defer func() {
-        if rec := recover(); rec != nil {
-            fmt.Fprintf(w, "Database connection failed: %v", rec)
-        }
-    }()
-
-    Dbconnect()
-    jwtKey = []byte(os.Getenv("JWT_SECRET_KEY"))
-
-    // Initialize the router
-    router := mux.NewRouter()
-    router.Use(CORS)  // Applying CORS middleware to the router
-
-    // Define routes with the router instance
-    router.HandleFunc("/test", Createuserdata).Methods("POST", "OPTIONS")
-    router.HandleFunc("/test1", sign).Methods("POST", "OPTIONS")
-    router.HandleFunc("/test2", login).Methods("POST", "OPTIONS")
-    router.HandleFunc("/Decode", Decode).Methods("POST", "OPTIONS")
-
-    // Serve the router on the server
-    server.GET("/", func(ctx *Context) {
-        ctx.JSON(200, H{"message": "Hello from Go and Vercel"})
-    })
-
-    // Route all requests through the router
-    router.ServeHTTP(w, r)
+	log.Println("Starting server on :8080")
+	log.Fatal(http.ListenAndServe(":8080", nil))
 }
