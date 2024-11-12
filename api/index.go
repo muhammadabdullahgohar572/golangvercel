@@ -1,7 +1,7 @@
 package main
 
 import (
-
+	
 	"net/http"
 	"time"
 
@@ -34,7 +34,8 @@ func GenerateJWT(userID string) (string, error) {
 	return token.SignedString(jwtSecret)
 }
 
-func main() {
+// Handler function for Vercel
+func Handler(w http.ResponseWriter, r *http.Request) {
 	router := gin.Default()
 
 	// Signup route
@@ -59,7 +60,6 @@ func main() {
 		}
 
 		// Simulate saving user data to a database
-		// In a real-world application, you'd save `req.Username`, `req.Email`, `req.Age`, `req.CompanyName`, and `hashedPassword` to a database
 		// Example: db.SaveUser(req.Username, req.Email, req.Age, req.CompanyName, hashedPassword)
 
 		// Return response with user details and hashed password
@@ -105,5 +105,7 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{"token": token})
 	})
 
-	router.Run(":8080")
+	// Serve the Gin router as the response to the Vercel function
+	router.ServeHTTP(w, r)
 }
+
