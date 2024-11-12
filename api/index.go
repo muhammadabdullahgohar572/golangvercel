@@ -164,15 +164,10 @@ func setupMongoDB() {
 	}
 	fmt.Println("Connected to MongoDB!")
 }
-func HelloWorld(w http.ResponseWriter, r *http.Request) {
-	// Set the content type to HTML
-	w.Header().Set("Content-Type", "text/html")
-	fmt.Fprintf(w, "<html><body><h1>Hello, World!</h1></body></html>")
-}
 
 func main() {
 	setupMongoDB()
-	http.HandleFunc("/", HelloWorld)
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/signup", Signup)
 	mux.HandleFunc("/login", Login)
